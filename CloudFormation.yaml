@@ -1,0 +1,216 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: this is a Vpc template 
+# Metadata: 
+
+# Parameters: 
+
+# Mappings: 
+
+# Conditions: 
+
+Resources:
+  myVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      Tags:
+       - Key: Name
+         Value: myVPC
+
+# creating internet gateway 
+  MyInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: InternetGateway
+# attacing the Internet gateway to the vpc
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: myVPC
+      InternetGatewayId: 
+        Ref : MyInternetGateway
+  
+  
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: us-east-1a  # add zone
+      VpcId: myVPC
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: PublicSubnet
+  
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties: 
+      VpcId: myVPC
+      Tags:
+        - Key: Name
+          Value: PublicRouteTable
+  
+    PublicRouteTableAssociation:
+      Type: AWS::EC2::SubnetRouteTableAssociation
+      Properties:
+        SubnetId:
+          Ref: PublicSubnet
+        RouteTableId:
+          Ref: PublicRouteTable
+  
+  
+  InternetRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Ref: PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: 
+        Ref : MyInternetGateway
+  
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: us-east-1a
+      VpcId: myVPC
+      CidrBlock: 10.0.2.0/24
+      Tags:
+        - Key: Name
+          Value: PrivateSubnet
+  
+  
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: myVPC
+      Tags:
+        - Key: Name
+          Value: PrivateRouteTable
+  
+  PrivateRouteTableAssociation:
+      Type: AWS::EC2::SubnetRouteTableAssociation
+      Properties:
+        SubnetId:
+          Ref: PrivateSubnet
+        RouteTableId:
+          Ref: PrivateRouteTable
+  
+  InternetSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: Allow http 
+      GroupDescription: Allow http to client host
+      VpcId: myVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 570
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: InternetSecurityGroup
+  
+  MyEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: AttachGateway
+    Properties:
+      Domain: myVPC
+  
+  MyEIPAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      InstanceId: 
+        Ref: MyELB         #reference to elastic load balancer
+      EIP: 
+        Ref: MyEIP         # reference to my elastic ip
+  
+
+  MyELB:
+    Type: AWS::ElasticLoadBalancing::LoadBalancer
+    Properties:
+      Subnets:
+        Ref: PublicSubnet
+      SecurityGroups:
+        Ref: InternetSecurityGroup
+      Listeners:
+        - LoadBalancerPort: "80"
+          InstancePort: "80"
+          Protocol: HTTP
+      AvailabilityZones:
+        - us-east-1a
+        - us-east-1b
+    DependsOn: MyEIPAssociation
+
+  NewKeyPair:
+    Type: 'AWS::EC2::KeyPair'
+    Properties:
+      KeyName: MyKeyPair
+  
+  EC2Instance1:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.micro
+      SecurityGroups:
+      Ref: InternetSecurityGroup
+      SubnetId: 
+        Ref:  PrivateSubnet
+      ImageId: ami-0c55b159cbfafe1f0 # Replace with your preferred AMI ID
+      KeyName: 
+        Ref: NewKeyPair
+      Tags:
+        - Key: Name
+          Value: PrivateInstance1
+
+  EC2Instance2:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.micro
+      SecurityGroups:
+        Ref: InternetSecurityGroup
+      SubnetId: 
+        Ref: PrivateSubnet
+      ImageId: ami-0c55b159cbfafe1f0 # Replace with your preferred AMI ID
+      KeyName: 
+        Ref: NewKeyPair
+      Tags:
+        - Key: Name
+          Value: PrivateInstance2 
+  
+  
+  
+  #nat Gateway
+  NATGateway:
+     Type: AWS::EC2::NatGateway
+     Properties:
+        AllocationId: 
+          Ref: NATGatewayEIP.AllocationId
+        SubnetId: 
+          Ref: PublicSubnet
+        Tags:
+        - Key: Name
+          Value: NATGateway
+  NATGatewayEIP:
+     Type: AWS::EC2::EIP
+     Properties:
+        Domain: myVPC
+  RouteNATGateway:
+     Type: AWS::EC2::Route
+     Properties:
+        RouteTableId: 
+          Ref : PrivateRouteTable
+        DestinationCidrBlock: '0.0.0.0/0'
+        NatGatewayId: 
+          Ref: NATGateway
+  
+  
+  
+Outputs:
